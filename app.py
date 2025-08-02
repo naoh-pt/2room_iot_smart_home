@@ -9,12 +9,12 @@ import threading
 app = Flask(__name__)
 
 # Cấu hình MQTT (HiveMQ Cloud)
-MQTT_BROKER = "3cbf355191014b65887cb024146a8d8b.s1.eu.hivemq.cloud"
+MQTT_BROKER = "4a97043579714e55aba4f9b977919abb.s1.eu.hivemq.cloud"
 MQTT_PORT = 8883
-MQTT_USER = "na_oh"
-MQTT_PASSWORD = "888888aA"
-MQTT_TOPIC = "iot/data"
-CONTROL_TOPIC_PREFIX = "iot/control/"
+MQTT_USER = "admin-1"
+MQTT_PASSWORD = "1n1n1n1N!"
+MQTT_TOPIC = "sensor/esp32/data"
+CONTROL_TOPIC_PREFIX = "sensor/esp32/set"
 
 # Cấu hình MariaDB
 db = mysql.connector.connect(
@@ -48,11 +48,11 @@ db.commit()
 
 # Biến toàn cục để lưu trạng thái thiết bị và dữ liệu mới nhất từ MQTT cho từng phòng
 device_states = {
-    "room1": {"img1": "off", "img2": "off"},
-    "room2": {"img1": "off", "img2": "off"}
+    "phong_ngu": {"light": "off", "fan": "off"},
+    "room2": {"light": "off", "fan": "off"}
 }
 latest_data = {
-    "room1": {"temperature": None, "humidity": None},
+    "phong_ngu": {"temperature": None, "humidity": None},
     "room2": {"temperature": None, "humidity": None}
 }
 
@@ -60,11 +60,15 @@ latest_data = {
 def on_message(client, userdata, message):
     payload = json.loads(message.payload.decode())
     room = payload.get("room")
+    light = payload.get("light_status")
+    fan = payload.get("fan_status")
     temp = payload.get("temperature")
     hum = payload.get("humidity")
-    if room in ["room1", "room2"] and temp is not None and hum is not None:
+    if room in ["phong_ngu", "room2"] and temp is not None and hum is not None:
         latest_data[room]["temperature"] = float(temp)
         latest_data[room]["humidity"] = float(hum)
+        device_states[room]["light"] = "on" if int(light) == 1 else "off"
+        device_states[room]["fan"] = "on" if int(fan) == 1 else "off"
 
 # Khởi tạo MQTT client
 client = mqtt.Client()
@@ -79,7 +83,7 @@ client.loop_start()
 def save_data_periodically():
     while True:
         time.sleep(60)
-        for room in ["room1", "room2"]:
+        for room in ["phong_ngu", "room2"]:
             if latest_data[room]["temperature"] is not None and latest_data[room]["humidity"] is not None:
                 now = datetime.now()
                 cursor.execute("INSERT INTO data (datetime, room, temperature, humidity) VALUES (%s, %s, %s, %s)", 
@@ -107,7 +111,7 @@ def select_room():
 # Route cho trang điều khiển phòng cụ thể
 @app.route('/room/<room>')
 def room_control(room):
-    if room not in ["room1", "room2"]:
+    if room not in ["phong_ngu", "room2"]:
         return "Room not found", 404
     data = get_latest_data(room)
     states = get_latest_state(room)
@@ -117,16 +121,22 @@ def room_control(room):
 # API để cập nhật trạng thái thiết bị qua MQTT cho phòng cụ thể
 @app.route('/toggle/<room>/<device>', methods=['POST'])
 def toggle_device(room, device):
-    if room in ["room1", "room2"] and device in ["img1", "img2"]:
+    if room in ["phong_ngu", "room2"] and device in ["light", "fan"]:
         new_state = "on" if device_states[room][device] == "off" else "off"
         device_states[room][device] = new_state
         now = datetime.now()
         cursor.execute("INSERT INTO state (datetime, room, devices, state) VALUES (%s, %s, %s, %s)", (now, room, device, new_state))
         db.commit()
         # Gửi lệnh qua MQTT tới topic cụ thể cho phòng và thiết bị
-        control_topic = f"{CONTROL_TOPIC_PREFIX}{room}/{device}"
-        state_value = 1 if new_state == "on" else 0
-        client.publish(control_topic, state_value)
+        control_topic = CONTROL_TOPIC_PREFIX
+        light_state_value = 1 if device_states[room]["light"] == "on" else 0
+        fan_state_value = 1 if device_states[room]["fan"] == "on" else 0
+        payload = json.dumps({
+            "room": room,
+            "light": light_state_value,
+            "fan": fan_state_value
+        })
+        client.publish(control_topic, payload)
     return jsonify({"status": "success", "room": room, "device": device, "state": new_state})
 
 # API tìm kiếm theo datetime cho phòng cụ thể
