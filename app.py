@@ -111,12 +111,28 @@ def select_room():
 # Route cho trang điều khiển phòng cụ thể
 @app.route('/room/<room>')
 def room_control(room):
-    if room not in ["phong_ngu", "room2"]:
-        return "Room not found", 404
+    # Kiểm tra phòng hợp lệ
+    valid_rooms = ["phong_ngu", "room2"]
+    if room not in valid_rooms:
+        # Trả về JSON báo lỗi
+        return jsonify({"error": "Room not found"}), 404
+
+    # Lấy dữ liệu
     data = get_latest_data(room)
     states = get_latest_state(room)
-    return render_template(f'{room}.html', room=room, data=data, states=states, device_states=device_states[room], 
-                           live_temp=latest_data[room]["temperature"], live_hum=latest_data[room]["humidity"])
+
+    # Đóng gói thành dict
+    result = {
+        "room": room,
+        "data": data,
+        "states": states,
+        "device_states": device_states[room],
+        "live_temp": latest_data[room]["temperature"],
+        "live_hum": latest_data[room]["humidity"]
+    }
+
+    # Trả JSON
+    return jsonify(result)
 
 # API để cập nhật trạng thái thiết bị qua MQTT cho phòng cụ thể
 @app.route('/toggle/<room>/<device>', methods=['POST'])
